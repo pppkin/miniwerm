@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>miniwerm</title>
+  <link rel="stylesheet" href="./lib/@wterm/dom/src/terminal.css">
+  <style>
+    @font-face { font-family: 'FiraCode'; src: url('FiraCode-VF.ttf') format('truetype'); }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    #terminal {
+      width: 100vw;
+      height: 100vh;
+      padding: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    #controls {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 10;
+      display: flex;
+      gap: 4px;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+    #controls:hover { opacity: 1; }
+    .picker {
+      background: rgba(30, 30, 30, 0.7);
+      color: #cdd6f4;
+      border: 1px solid rgba(205, 214, 244, 0.15);
+      border-radius: 4px;
+      padding: 3px 6px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      outline: none;
+    }
+    #status {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 10;
+      font-size: 11px;
+      font-family: 'FiraCode', monospace;
+      padding: 3px 8px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #status.visible { opacity: 0.8; }
+    #status.connected { background: rgba(166,227,161,0.2); color: #a6e3a1; }
+    #status.reconnecting { background: rgba(249,226,175,0.2); color: #f9e2af; }
+    #status.disconnected { background: rgba(243,139,168,0.2); color: #f38ba8; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "@wterm/core": "./lib/@wterm/core/dist/index.js",
+      "@wterm/dom": "./lib/@wterm/dom/dist/index.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="status"></div>
+  <div id="controls">
+    <select id="font-size-picker" class="picker">
+      <option value="10">10</option>
+      <option value="12">12</option>
+      <option value="14" selected>14</option>
+      <option value="16">16</option>
+      <option value="18">18</option>
+      <option value="20">20</option>
+      <option value="24">24</option>
+    </select>
+    <select id="theme-picker" class="picker">
+      <option value="mocha">Mocha</option>
+      <option value="macchiato">Macchiato</option>
+      <option value="frappe">Frappe</option>
+      <option value="latte">Latte</option>
+    </select>
+  </div>
+  <div id="terminal"></div>
+
+  <script type="module">
+    import { WTerm } from "@wterm/dom";
+
+    let sessionId = localStorage.getItem("term-session-id");
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem("term-session-id", sessionId);
+    }
+
+    const themes = {
+      mocha: {
+        fg: '#cdd6f4', bg: '#1e1e2e', cursor: '#f5e0dc',
+        colors: [
+          '#45475a','#f38ba8','#a6e3a1','#f9e2af',
+          '#89b4fa','#f5c2e7','#94e2d5','#bac2de',
+          '#585b70','#f38ba8','#a6e3a1','#f9e2af',
+          '#89b4fa','#f5c2e7','#94e2d5','#a6adc8',
+        ],
+      },
+      macchiato: {
+        fg: '#cad3f5', bg: '#24273a', cursor: '#f4dbd6',
+        colors: [
+          '#494d64','#ed8796','#a6da95','#eed49f',
+          '#8aadf4','#f5bde6','#8bd5ca','#b8c0e0',
+          '#5b6078','#ed8796','#a6da95','#eed49f',
+          '#8aadf4','#f5bde6','#8bd5ca','#a5adcb',
+        ],
+      },
+      frappe: {
+        fg: '#c6d0f5', bg: '#303446', cursor: '#f2d5cf',
+        colors: [
+          '#51576d','#e78284','#a6d189','#e5c890',
+          '#8caaee','#f4b8e4','#81c8be','#b5bfe2',
+          '#626880','#e78284','#a6d189','#e5c890',
+          '#8caaee','#f4b8e4','#81c8be','#a5adce',
+        ],
+      },
+      latte: {
+        fg: '#4c4f69', bg: '#eff1f5', cursor: '#dc8a78',
+        colors: [
+          '#5c5f77','#d20f39','#40a02b','#df8e1d',
+          '#1e66f5','#8839ef','#179299','#acb0be',
+          '#6c6f85','#d20f39','#40a02b','#df8e1d',
+          '#1e66f5','#8839ef','#179299','#bcc0cc',
+        ],
+      },
+    };
+
+    const savedTheme = localStorage.getItem("catppuccin-theme") || "mocha";
+    const savedFontSize = localStorage.getItem("terminal-font-size") || "14";
+    const picker = document.getElementById("theme-picker");
+    const fontSizePicker = document.getElementById("font-size-picker");
+    picker.value = savedTheme;
+    fontSizePicker.value = savedFontSize;
+
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    let ws = null;
+    let reconnectDelay = 1000;
+    let termClosed = false;
+
+    function send(msg) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      }
+    }
+
+    const term = new WTerm(document.getElementById("terminal"), {
+      cursorBlink: true,
+      cols: 80,
+      rows: 24,
+    });
+
+    term.element.style.setProperty("--term-font-family", "'FiraCode', monospace");
+    term.element.style.setProperty("--term-font-size", `${savedFontSize}px`);
+
+    await term.init();
+
+    function applyTheme(name) {
+      const t = themes[name];
+      const el = term.element;
+      document.documentElement.style.background = t.bg;
+      document.body.style.background = t.bg;
+      el.style.setProperty("--term-fg", t.fg);
+      el.style.setProperty("--term-bg", t.bg);
+      el.style.setProperty("--term-cursor", t.cursor);
+      for (let i = 0; i < 16; i++) {
+        el.style.setProperty(`--term-color-${i}`, t.colors[i]);
+      }
+      localStorage.setItem("catppuccin-theme", name);
+      send({ type: "bg", color: t.bg });
+    }
+
+    applyTheme(savedTheme);
+
+    picker.addEventListener("change", () => applyTheme(picker.value));
+    fontSizePicker.addEventListener("change", () => {
+      term.element.style.setProperty("--term-font-size", `${fontSizePicker.value}px`);
+      localStorage.setItem("terminal-font-size", fontSizePicker.value);
+    });
+
+    const statusEl = document.getElementById("status");
+    let statusTimer;
+    function showStatus(text, type, duration = 3000) {
+      statusEl.textContent = text;
+      statusEl.className = `visible ${type}`;
+      clearTimeout(statusTimer);
+      if (duration > 0) {
+        statusTimer = setTimeout(() => { statusEl.className = ""; }, duration);
+      }
+    }
+
+    function connect() {
+      ws = new WebSocket(`${proto}//${location.host}`);
+
+      ws.onopen = () => {
+        termClosed = false;
+        const bg = themes[localStorage.getItem("catppuccin-theme") || "mocha"].bg;
+        send({ type: "session", id: sessionId, cols: term.cols, rows: term.rows, bg });
+      };
+
+      ws.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch { return; }
+
+        if (msg.type === "connected") {
+          reconnectDelay = 1000;
+          if (msg.reconnected) {
+            showStatus("Reconnected", "connected", 3000);
+            term.write("\r\n\x1b[32m[Reconnected to session]\x1b[0m\r\n");
+          } else {
+            showStatus("Connected", "connected", 2000);
+          }
+        } else if (msg.type === "output" && typeof msg.data === "string") {
+          term.write(msg.data);
+        } else if (msg.type === "exit") {
+          termClosed = true;
+          showStatus("Shell exited", "disconnected", 0);
+          term.write("\r\n\x1b[31m[Shell exited]\x1b[0m");
+        }
+      };
+
+      ws.onclose = () => {
+        if (termClosed) return;
+        showStatus("Disconnected — reconnecting...", "reconnecting", 0);
+        term.write("\r\n\x1b[33m[Disconnected, reconnecting...]\x1b[0m");
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+          connect();
+        }, reconnectDelay);
+      };
+
+      ws.onerror = () => { ws.close(); };
+    }
+
+    connect();
+
+    term.onData = (data) => { send({ type: "input", data }); };
+    term.onResize = (cols, rows) => { send({ type: "resize", cols, rows }); };
+  </script>
+</body>
+</html>

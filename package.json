@@ -1,0 +1,17 @@
+{
+  "name": "miniwerm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty"
+    ]
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.3"
+  }
+}

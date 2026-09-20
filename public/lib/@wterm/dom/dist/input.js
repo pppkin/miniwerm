@@ -1,0 +1,411 @@
+import { isLinkActivationModifier } from "./hyperlink.js";
+import { encodeKittyKey, KITTY_REPORT_ALL, KITTY_REPORT_EVENTS, } from "./kitty-keys.js";
+const NORMAL_KEYS = {
+    ArrowUp: "\x1b[A",
+    ArrowDown: "\x1b[B",
+    ArrowRight: "\x1b[C",
+    ArrowLeft: "\x1b[D",
+    Home: "\x1b[H",
+    End: "\x1b[F",
+};
+const APP_KEYS = {
+    ArrowUp: "\x1bOA",
+    ArrowDown: "\x1bOB",
+    ArrowRight: "\x1bOC",
+    ArrowLeft: "\x1bOD",
+    Home: "\x1bOH",
+    End: "\x1bOF",
+};
+const FIXED_KEYS = {
+    Enter: "\r",
+    Backspace: "\x7f",
+    Tab: "\t",
+    Escape: "\x1b",
+    Insert: "\x1b[2~",
+    Delete: "\x1b[3~",
+    PageUp: "\x1b[5~",
+    PageDown: "\x1b[6~",
+    F1: "\x1bOP",
+    F2: "\x1bOQ",
+    F3: "\x1bOR",
+    F4: "\x1bOS",
+    F5: "\x1b[15~",
+    F6: "\x1b[17~",
+    F7: "\x1b[18~",
+    F8: "\x1b[19~",
+    F9: "\x1b[20~",
+    F10: "\x1b[21~",
+    F11: "\x1b[23~",
+    F12: "\x1b[24~",
+};
+export class InputHandler {
+    constructor(element, onData, getBridge, getCellSize = () => null) {
+        this.composing = false;
+        this.mouseButtons = 0;
+        this.focused = false;
+        this.suppressedKeyUps = new Set();
+        this.pressedModifiers = new Set();
+        this.deliveredKeys = new Set();
+        this.element = element;
+        this.onData = onData;
+        this.getBridge = getBridge;
+        this.getCellSize = getCellSize;
+        this.textarea = document.createElement("textarea");
+        this.textarea.setAttribute("autocapitalize", "off");
+        this.textarea.setAttribute("autocomplete", "off");
+        this.textarea.setAttribute("autocorrect", "off");
+        this.textarea.setAttribute("spellcheck", "false");
+        this.textarea.setAttribute("enterkeyhint", "send");
+        this.textarea.setAttribute("tabindex", "0");
+        this.textarea.setAttribute("aria-hidden", "true");
+        const s = this.textarea.style;
+        s.position = "absolute";
+        s.left = "-9999px";
+        s.top = "0";
+        s.width = "1px";
+        s.height = "1px";
+        s.opacity = "0";
+        s.overflow = "hidden";
+        s.border = "0";
+        s.padding = "0";
+        s.margin = "0";
+        s.outline = "none";
+        s.resize = "none";
+        s.pointerEvents = "none";
+        s.caretColor = "transparent";
+        s.color = "transparent";
+        s.background = "transparent";
+        element.appendChild(this.textarea);
+        this._onKeyDown = this.handleKeyDown.bind(this);
+        this._onKeyUp = this.handleKeyUp.bind(this);
+        this._onPaste = this.handlePaste.bind(this);
+        this._onCompositionStart = this.handleCompositionStart.bind(this);
+        this._onCompositionEnd = this.handleCompositionEnd.bind(this);
+        this._onInput = this.handleInput.bind(this);
+        this._onFocus = () => {
+            if (this.focused)
+                return;
+            this.focused = true;
+            this.element.classList.add("focused");
+            if (this.getBridge()?.focusEvents?.())
+                this.onData("\x1b[I");
+        };
+        this._onBlur = () => {
+            this.focused = false;
+            this.element.classList.remove("focused");
+            this.stopMouseCapture();
+            this.pressedModifiers.clear();
+            this.deliveredKeys.clear();
+            if (this.getBridge()?.focusEvents?.())
+                this.onData("\x1b[O");
+        };
+        this._onMouseDown = (event) => this.handleMouse(event, "press");
+        this._onMouseMove = (event) => {
+            if (this.mouseButtons !== 0)
+                this.handleMouse(event, "move");
+        };
+        this._onMouseUp = (event) => {
+            if (this.mouseButtons === 0)
+                return;
+            this.handleMouse(event, "release");
+            this.mouseButtons = event.buttons & 7;
+            if (this.mouseButtons === 0)
+                this.stopMouseCapture();
+        };
+        this._onWheel = (event) => this.handleMouse(event, "wheel");
+        this.textarea.addEventListener("keydown", this._onKeyDown);
+        this.textarea.addEventListener("keyup", this._onKeyUp);
+        this.textarea.addEventListener("paste", this._onPaste);
+        this.textarea.addEventListener("compositionstart", this._onCompositionStart);
+        this.textarea.addEventListener("compositionend", this._onCompositionEnd);
+        this.textarea.addEventListener("input", this._onInput);
+        this.textarea.addEventListener("focus", this._onFocus);
+        this.textarea.addEventListener("blur", this._onBlur);
+        this.element.addEventListener("mousedown", this._onMouseDown);
+        this.element.addEventListener("wheel", this._onWheel, { passive: false });
+    }
+    focus() {
+        this.textarea.focus({ preventScroll: true });
+    }
+    destroy() {
+        this.textarea.removeEventListener("keydown", this._onKeyDown);
+        this.textarea.removeEventListener("keyup", this._onKeyUp);
+        this.textarea.removeEventListener("paste", this._onPaste);
+        this.textarea.removeEventListener("compositionstart", this._onCompositionStart);
+        this.textarea.removeEventListener("compositionend", this._onCompositionEnd);
+        this.textarea.removeEventListener("input", this._onInput);
+        this.textarea.removeEventListener("focus", this._onFocus);
+        this.textarea.removeEventListener("blur", this._onBlur);
+        this.element.removeEventListener("mousedown", this._onMouseDown);
+        this.stopMouseCapture();
+        this.element.removeEventListener("wheel", this._onWheel);
+        this.element.classList.remove("focused");
+        this.textarea.remove();
+    }
+    handleKeyDown(e) {
+        const keyId = e.code || e.key;
+        const physicalModifier = /^(Shift|Control|Alt|Meta)(Left|Right)$/.test(e.code);
+        if (physicalModifier) {
+            this.pressedModifiers.add(e.code);
+        }
+        if (this.composing || e.isComposing || e.keyCode === 229) {
+            this.suppressedKeyUps.add(keyId);
+            return;
+        }
+        const bridge = this.getBridge();
+        const kittyFlags = bridge?.kittyKeyboardFlags?.() ?? 0;
+        const kittyOwnsModifier = physicalModifier && Boolean(kittyFlags & KITTY_REPORT_ALL);
+        const delivered = this.deliveredKeys.has(keyId);
+        if (!delivered && (e.metaKey || e.ctrlKey) && e.key === "c") {
+            const sel = window.getSelection();
+            if (sel && sel.toString().length > 0) {
+                this.suppressedKeyUps.add(keyId);
+                return;
+            }
+        }
+        if (!delivered && (e.metaKey || e.ctrlKey) && e.key === "v") {
+            this.suppressedKeyUps.add(keyId);
+            this.textarea.focus();
+            return;
+        }
+        if (!delivered && !kittyOwnsModifier && e.metaKey && !e.ctrlKey) {
+            this.suppressedKeyUps.add(keyId);
+            if (e.key === "Backspace") {
+                e.preventDefault();
+                this.onData("\x15");
+            }
+            else if (e.key === "a") {
+                e.preventDefault();
+                const sel = window.getSelection();
+                if (sel) {
+                    const range = document.createRange();
+                    range.selectNodeContents(this.element);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                }
+            }
+            return;
+        }
+        this.suppressedKeyUps.delete(keyId);
+        e.preventDefault();
+        if (kittyFlags !== 0) {
+            const seq = encodeKittyKey(e, kittyFlags, e.repeat ? "repeat" : "press", this.pressedModifiers, bridge?.cursorKeysApp?.() ?? false);
+            if (seq) {
+                this.deliveredKeys.add(keyId);
+                this.onData(seq);
+            }
+            return;
+        }
+        const seq = this.keyToSequence(e);
+        if (seq)
+            this.onData(seq);
+    }
+    handleKeyUp(e) {
+        const keyId = e.code || e.key;
+        this.pressedModifiers.delete(e.code);
+        this.deliveredKeys.delete(keyId);
+        if (this.suppressedKeyUps.delete(keyId))
+            return;
+        if (this.composing)
+            return;
+        const bridge = this.getBridge();
+        const kittyFlags = bridge?.kittyKeyboardFlags?.() ?? 0;
+        if (!(kittyFlags & KITTY_REPORT_EVENTS))
+            return;
+        const seq = encodeKittyKey(e, kittyFlags, "release", this.pressedModifiers, bridge?.cursorKeysApp?.() ?? false);
+        if (!seq)
+            return;
+        e.preventDefault();
+        this.onData(seq);
+    }
+    handlePaste(e) {
+        e.preventDefault();
+        const text = e.clipboardData?.getData("text");
+        if (!text)
+            return;
+        const bridge = this.getBridge();
+        if (bridge && bridge.bracketedPaste()) {
+            // Strip ESC bytes so clipboard payloads cannot inject \x1b[201~ to
+            // break out of bracketed paste mode and smuggle commands to the PTY.
+            const safe = text.replace(/\x1b/g, "");
+            this.onData("\x1b[200~" + safe + "\x1b[201~");
+        }
+        else {
+            this.onData(text);
+        }
+    }
+    handleCompositionStart() {
+        this.composing = true;
+    }
+    handleCompositionEnd(e) {
+        this.composing = false;
+        if (e.data)
+            this.onData(e.data);
+        this.textarea.value = "";
+    }
+    handleInput() {
+        if (this.composing)
+            return;
+        const value = this.textarea.value;
+        if (value) {
+            this.onData(value);
+            this.textarea.value = "";
+        }
+    }
+    handleMouse(event, kind) {
+        const bridge = this.getBridge();
+        const tracking = bridge?.mouseTracking?.() ?? 0;
+        if (!bridge || tracking === 0 || !bridge.mouseSgr?.())
+            return;
+        if (kind === "press" &&
+            isLinkActivationModifier(event, this.element.ownerDocument.defaultView?.navigator ?? navigator) &&
+            event.target instanceof Element &&
+            event.target.closest(".term-link")) {
+            return;
+        }
+        if (kind === "press" && (event.shiftKey || event.button > 2))
+            return;
+        if (kind === "release" && event.button > 2)
+            return;
+        const supportedButtons = event.buttons & 7;
+        if (kind === "move" && (tracking !== 1002 || supportedButtons === 0)) {
+            return;
+        }
+        const view = this.element.ownerDocument.defaultView;
+        if (!view)
+            return;
+        const viewportRow = this.element.querySelector(".term-row:not(.term-scrollback-row)");
+        const hostRect = this.element.getBoundingClientRect();
+        const rowRect = viewportRow?.getBoundingClientRect();
+        const cellSize = this.getCellSize();
+        let left;
+        let top;
+        let charWidth;
+        let rowHeight;
+        if (rowRect && cellSize) {
+            left = rowRect.left;
+            top = rowRect.top;
+            charWidth = cellSize.charWidth;
+            rowHeight = cellSize.rowHeight;
+        }
+        else {
+            const style = view.getComputedStyle(this.element);
+            const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+            const borderRight = parseFloat(style.borderRightWidth) || 0;
+            const borderTop = parseFloat(style.borderTopWidth) || 0;
+            const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+            const paddingLeft = parseFloat(style.paddingLeft) || 0;
+            const paddingRight = parseFloat(style.paddingRight) || 0;
+            const paddingTop = parseFloat(style.paddingTop) || 0;
+            const paddingBottom = parseFloat(style.paddingBottom) || 0;
+            left = rowRect?.left ?? hostRect.left + borderLeft + paddingLeft;
+            top = rowRect?.top ?? hostRect.top + borderTop + paddingTop;
+            charWidth =
+                (hostRect.width -
+                    borderLeft -
+                    borderRight -
+                    paddingLeft -
+                    paddingRight) /
+                    bridge.getCols();
+            rowHeight =
+                (hostRect.height -
+                    borderTop -
+                    borderBottom -
+                    paddingTop -
+                    paddingBottom) /
+                    bridge.getRows();
+        }
+        if (charWidth <= 0 || rowHeight <= 0)
+            return;
+        if (kind === "press") {
+            this.textarea.focus({ preventScroll: true });
+            if (!this.focused)
+                this._onFocus();
+            this.mouseButtons =
+                supportedButtons ||
+                    (event.button === 1 ? 4 : event.button === 2 ? 2 : 1);
+            view.addEventListener("mousemove", this._onMouseMove);
+            view.addEventListener("mouseup", this._onMouseUp);
+        }
+        const col = Math.max(1, Math.min(bridge.getCols(), Math.floor((event.clientX - left) / charWidth) + 1));
+        const row = Math.max(1, Math.min(bridge.getRows(), Math.floor((event.clientY - top) / rowHeight) + 1));
+        const modifiers = (event.shiftKey ? 4 : 0) |
+            (event.altKey ? 8 : 0) |
+            (event.ctrlKey ? 16 : 0);
+        let code;
+        let final = "M";
+        if (kind === "wheel") {
+            const wheel = event;
+            if (Math.abs(wheel.deltaX) > Math.abs(wheel.deltaY)) {
+                if (wheel.deltaX === 0)
+                    return;
+                code = (wheel.deltaX < 0 ? 66 : 67) | modifiers;
+            }
+            else {
+                if (wheel.deltaY === 0)
+                    return;
+                code = (wheel.deltaY < 0 ? 64 : 65) | modifiers;
+            }
+        }
+        else {
+            const button = kind === "move"
+                ? supportedButtons & 4
+                    ? 1
+                    : supportedButtons & 2
+                        ? 2
+                        : 0
+                : event.button === 1
+                    ? 1
+                    : event.button === 2
+                        ? 2
+                        : 0;
+            code = button | modifiers | (kind === "move" ? 32 : 0);
+            if (kind === "release")
+                final = "m";
+        }
+        event.preventDefault();
+        this.onData(`\x1b[<${code};${col};${row}${final}`);
+    }
+    stopMouseCapture() {
+        this.mouseButtons = 0;
+        const view = this.element.ownerDocument.defaultView;
+        view?.removeEventListener("mousemove", this._onMouseMove);
+        view?.removeEventListener("mouseup", this._onMouseUp);
+    }
+    keyToSequence(e) {
+        if (e.ctrlKey && !e.altKey && !e.metaKey) {
+            if (e.key.length === 1) {
+                const code = e.key.toLowerCase().charCodeAt(0);
+                if (code >= 97 && code <= 122)
+                    return String.fromCharCode(code - 96);
+            }
+            if (e.key === "[")
+                return "\x1b";
+            if (e.key === "\\")
+                return "\x1c";
+            if (e.key === "]")
+                return "\x1d";
+            if (e.key === "^")
+                return "\x1e";
+            if (e.key === "_")
+                return "\x1f";
+        }
+        if (e.key === "Enter" && e.shiftKey)
+            return "\x1b[13;2u";
+        if (e.key === "Tab" && e.shiftKey)
+            return "\x1b[Z";
+        const fixed = FIXED_KEYS[e.key];
+        if (fixed)
+            return e.altKey ? "\x1b" + fixed : fixed;
+        const bridge = this.getBridge();
+        const appMode = bridge && bridge.cursorKeysApp();
+        const navMap = appMode ? APP_KEYS : NORMAL_KEYS;
+        const nav = navMap[e.key];
+        if (nav)
+            return e.altKey ? "\x1b" + nav : nav;
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+            return e.altKey ? "\x1b" + e.key : e.key;
+        }
+        return null;
+    }
+}
