@@ -145,6 +145,16 @@
     let reconnectDelay = 1000;
     let termClosed = false;
 
+    // Local echo prediction: tracks characters echoed locally so we can
+    // suppress the shell's echo when it arrives, avoiding double-rendering.
+    let pred = "";
+    let predTimer = null;
+    function clearPred() { pred = ""; clearTimeout(predTimer); }
+    function isPrintable(ch) {
+      const c = ch.charCodeAt(0);
+      return c >= 0x20 && c <= 0x7e;
+    }
+
     function send(msg) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(msg));
@@ -211,6 +221,7 @@
 
         if (msg.type === "connected") {
           reconnectDelay = 1000;
+          clearPred();
           if (msg.reconnected) {
             showStatus("Reconnected", "connected", 3000);
             term.write("\r\n\x1b[32m[Reconnected to session]\x1b[0m\r\n");
@@ -218,7 +229,14 @@
             showStatus("Connected", "connected", 2000);
           }
         } else if (msg.type === "output" && typeof msg.data === "string") {
-          term.write(msg.data);
+          let data = msg.data;
+          if (pred.length > 0 && data.startsWith(pred)) {
+            data = data.slice(pred.length);
+            clearPred();
+          } else if (pred.length > 0) {
+            clearPred();
+          }
+          if (data) term.write(data);
         } else if (msg.type === "exit") {
           termClosed = true;
           showStatus("Shell exited", "disconnected", 0);
@@ -227,6 +245,7 @@
       };
 
       ws.onclose = () => {
+        clearPred();
         if (termClosed) return;
         showStatus("Disconnected — reconnecting...", "reconnecting", 0);
         term.write("\r\n\x1b[33m[Disconnected, reconnecting...]\x1b[0m");
@@ -241,8 +260,18 @@
 
     connect();
 
-    term.onData = (data) => { send({ type: "input", data }); };
-    term.onResize = (cols, rows) => { send({ type: "resize", cols, rows }); };
+    term.onData = (data) => {
+      if (data.length === 1 && isPrintable(data)) {
+        term.write(data);
+        pred += data;
+        clearTimeout(predTimer);
+        predTimer = setTimeout(clearPred, 500);
+      } else {
+        clearPred();
+      }
+      send({ type: "input", data });
+    };
+    term.onResize = (cols, rows) => { clearPred(); send({ type: "resize", cols, rows }); };
   </script>
 </body>
 </html>
