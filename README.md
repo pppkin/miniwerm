@@ -1,40 +1,35 @@
 # miniwerm
 
-A minimal web-based terminal. Opens your shell in the browser at `http://localhost:7654`.
+Minimal web terminal. Shell in the browser at `http://localhost:7654`.
 
-Powered by [wterm](https://github.com/vercel-labs/wterm) — renders to the DOM for native text selection, copy/paste, and browser find.
-
-## Prerequisites
-
-- [Node.js](https://nodejs.org/) 18+
-- [pnpm](https://pnpm.io/) 9+
+Uses [wterm](https://github.com/vercel-labs/wterm) for DOM-rendered terminals (native selection, copy/paste, Ctrl+F).
 
 ## Setup
+
+Requires Node.js 18+ and pnpm 9+.
 
 ```bash
 pnpm install
 pnpm start
 ```
 
-Then open `http://localhost:7654` in your browser.
+Open `http://localhost:7654`.
 
 ## Features
 
-- Full shell access via WebSocket + node-pty
-- DOM-rendered terminal (native selection, copy/paste, Ctrl+F find)
-- **Persistent sessions** — shell survives browser disconnects (mobile lock screen, network drop, etc.)
-- Auto-reconnect with backoff on disconnect
+- Shell access via WebSocket + node-pty
+- DOM-rendered (native selection, copy/paste, browser find)
+- Persistent sessions survive disconnects (mobile lock, network drop)
+- Auto-reconnect with backoff
 - Catppuccin themes (Mocha, Macchiato, Frappé, Latte)
-- FiraCode font, adjustable font size
-- Localhost-only by default (not accessible from other devices)
+- FiraCode font, adjustable size
+- Localhost-only (no network access)
 
-## How Sessions Work
+## Sessions
 
-Each browser gets a unique session ID stored in `localStorage`. When the WebSocket disconnects (e.g. phone locks), the server keeps the PTY process alive. When the browser reconnects, it resumes the same shell session.
+Each browser gets a unique ID in `localStorage`. On disconnect the server keeps the PTY alive; reconnect resumes the same shell. Sessions expire after 30min (configurable).
 
-Sessions time out after 30 minutes of disconnection (configurable with `--timeout`).
-
-## Customization
+## CLI Options
 
 | Flag | Env | Default | Example |
 |------|-----|---------|---------|
