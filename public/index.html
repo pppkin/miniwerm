@@ -214,6 +214,20 @@
       }
     }
 
+    const typeOutput = 0x02;
+    const typeInput = 0x01;
+    const decoder = new TextDecoder();
+
+    function sendInput(data) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const bytes = new TextEncoder().encode(data);
+        const frame = new Uint8Array(1 + bytes.length);
+        frame[0] = typeInput;
+        frame.set(bytes, 1);
+        ws.send(frame);
+      }
+    }
+
     const term = new WTerm(document.getElementById("terminal"), {
       cursorBlink: true,
       cols: 80,
@@ -261,6 +275,7 @@
 
     function connect() {
       ws = new WebSocket(`${proto}//${location.host}`);
+      ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
         termClosed = false;
@@ -269,6 +284,21 @@
       };
 
       ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) {
+          const view = new Uint8Array(e.data);
+          if (view[0] === typeOutput && view.length > 1) {
+            let data = decoder.decode(view.slice(1));
+            if (pred.length > 0 && data.startsWith(pred)) {
+              data = data.slice(pred.length);
+              clearPred();
+            } else if (pred.length > 0) {
+              clearPred();
+            }
+            if (data) term.write(data);
+          }
+          return;
+        }
+
         let msg;
         try { msg = JSON.parse(e.data); } catch { return; }
 
@@ -281,15 +311,6 @@
           } else {
             showStatus("Connected", "connected", 2000);
           }
-        } else if (msg.type === "output" && typeof msg.data === "string") {
-          let data = msg.data;
-          if (pred.length > 0 && data.startsWith(pred)) {
-            data = data.slice(pred.length);
-            clearPred();
-          } else if (pred.length > 0) {
-            clearPred();
-          }
-          if (data) term.write(data);
         } else if (msg.type === "exit") {
           termClosed = true;
           showStatus("Shell exited", "disconnected", 0);
@@ -316,7 +337,7 @@
     term.onData = (data) => {
       if (modCtrl || modAlt) {
         data = applyMod(data);
-        send({ type: "input", data });
+        sendInput(data);
         return;
       }
       if (echoEnabled && data.length === 1 && isPrintable(data)) {
@@ -327,9 +348,15 @@
       } else {
         clearPred();
       }
-      send({ type: "input", data });
+      sendInput(data);
     };
-    term.onResize = (cols, rows) => { clearPred(); send({ type: "resize", cols, rows }); };
+
+    let resizeTimer = null;
+    term.onResize = (cols, rows) => {
+      clearPred();
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => send({ type: "resize", cols, rows }), 100);
+    };
 
     // Mobile modifier bar
     const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -400,7 +427,7 @@
 
       const key = btn.dataset.key;
       if (key && sendKeys[key]) {
-        send({ type: "input", data: applyMod(sendKeys[key]) });
+        sendInput(applyMod(sendKeys[key]));
       }
     });
   </script>

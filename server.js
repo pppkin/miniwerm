@@ -53,6 +53,18 @@ const server = http.createServer((req, res) => {
 
 const sessions = new Map();
 
+const TYPE_INPUT = 0x01;
+const TYPE_OUTPUT = 0x02;
+
+function sendBinary(ws, type, data) {
+  if (!ws || ws.readyState !== ws.OPEN) return;
+  const buf = Buffer.from(data, "utf-8");
+  const frame = Buffer.alloc(1 + buf.length);
+  frame[0] = type;
+  buf.copy(frame, 1);
+  ws.send(frame);
+}
+
 function send(ws, msg) {
   if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -82,15 +94,19 @@ wss.on("connection", (ws, req) => {
   let session = null;
 
   ws.on("message", (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
+    let msg = null;
+    const isBinary = Buffer.isBuffer(raw);
+
+    if (!isBinary) {
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
     }
 
     if (!sessionId) {
-      if (msg.type !== "session" || !msg.id) {
+      if (!msg || msg.type !== "session" || !msg.id) {
         ws.close();
         return;
       }
@@ -121,6 +137,16 @@ wss.on("connection", (ws, req) => {
         sessions.set(sessionId, session);
 
         let oscBuf = "";
+        let outBuf = "";
+        let outTimer = null;
+
+        function flushOutput() {
+          outTimer = null;
+          const s = sessions.get(sessionId);
+          if (s && outBuf) sendBinary(s.ws, TYPE_OUTPUT, outBuf);
+          outBuf = "";
+        }
+
         ptyProcess.onData((data) => {
           const s = sessions.get(sessionId);
           if (!s) return;
@@ -161,10 +187,16 @@ wss.on("connection", (ws, req) => {
           oscBuf = "";
 
           const filtered = parts.join("");
-          if (filtered) send(s.ws, { type: "output", data: filtered });
+          if (!filtered) return;
+
+          outBuf += filtered;
+          if (!outTimer) {
+            outTimer = setTimeout(flushOutput, 5);
+          }
         });
 
         ptyProcess.onExit(({ exitCode, signal }) => {
+          if (outTimer) { clearTimeout(outTimer); flushOutput(); }
           const s = sessions.get(sessionId);
           if (s) send(s.ws, { type: "exit", exitCode, signal });
           sessions.delete(sessionId);
@@ -177,7 +209,9 @@ wss.on("connection", (ws, req) => {
 
     if (!session) return;
 
-    if (msg.type === "input" && typeof msg.data === "string") {
+    if (Buffer.isBuffer(raw) && raw.length > 1 && raw[0] === TYPE_INPUT) {
+      session.pty.write(raw.slice(1).toString("utf-8"));
+    } else if (msg.type === "input" && typeof msg.data === "string") {
       session.pty.write(msg.data);
     } else if (msg.type === "resize") {
       session.cols = msg.cols || session.cols;
