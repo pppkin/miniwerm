@@ -38,6 +38,7 @@
       cursor: pointer;
       outline: none;
     }
+    .picker.active { background: rgba(166,227,161,0.3); border-color: #a6e3a1; }
     #status {
       position: fixed;
       top: 8px;
@@ -67,6 +68,7 @@
 <body>
   <div id="status"></div>
   <div id="controls">
+    <button id="echo-toggle" class="picker" title="Local echo (instant typing)">echo</button>
     <select id="font-size-picker" class="picker">
       <option value="10">10</option>
       <option value="12">12</option>
@@ -147,6 +149,7 @@
 
     // Local echo prediction: tracks characters echoed locally so we can
     // suppress the shell's echo when it arrives, avoiding double-rendering.
+    let echoEnabled = localStorage.getItem("local-echo") === "true";
     let pred = "";
     let predTimer = null;
     function clearPred() { pred = ""; clearTimeout(predTimer); }
@@ -154,6 +157,15 @@
       const c = ch.charCodeAt(0);
       return c >= 0x20 && c <= 0x7e;
     }
+    const echoToggle = document.getElementById("echo-toggle");
+    function syncEchoBtn() { echoToggle.classList.toggle("active", echoEnabled); }
+    syncEchoBtn();
+    echoToggle.addEventListener("click", () => {
+      echoEnabled = !echoEnabled;
+      localStorage.setItem("local-echo", echoEnabled);
+      syncEchoBtn();
+      clearPred();
+    });
 
     function send(msg) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -261,7 +273,7 @@
     connect();
 
     term.onData = (data) => {
-      if (data.length === 1 && isPrintable(data)) {
+      if (echoEnabled && data.length === 1 && isPrintable(data)) {
         term.write(data);
         pred += data;
         clearTimeout(predTimer);
