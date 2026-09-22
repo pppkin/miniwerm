@@ -380,6 +380,12 @@
       return s;
     }
 
+    modbar.addEventListener("pointerdown", (e) => {
+      const btn = e.target.closest(".modkey");
+      if (!btn) return;
+      e.preventDefault();
+    }, { passive: false });
+
     modbar.addEventListener("click", (e) => {
       const btn = e.target.closest(".modkey");
       if (!btn) return;
