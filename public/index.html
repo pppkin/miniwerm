@@ -361,6 +361,14 @@
       resizeTimer = setTimeout(() => send({ type: "resize", cols, rows }), 100);
     };
 
+    // Debug: log touch events
+    ["touchstart", "touchmove", "touchend", "touchcancel"].forEach((evt) => {
+      document.addEventListener(evt, (e) => {
+        const el = e.target.tagName + (e.target.className ? "." + e.target.className.split(" ")[0] : "");
+        console.log(`[touch] ${evt} target=${el} touches=${e.touches.length} passive=${evt.passive}`);
+      }, { capture: true, passive: true });
+    });
+
     // Mobile modifier bar
     const isMobile = navigator.maxTouchPoints > 0
       || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
