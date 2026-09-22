@@ -55,6 +55,37 @@
     #status.connected { background: rgba(166,227,161,0.2); color: #a6e3a1; }
     #status.reconnecting { background: rgba(249,226,175,0.2); color: #f9e2af; }
     #status.disconnected { background: rgba(243,139,168,0.2); color: #f38ba8; }
+    #modbar {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      background: rgba(17, 17, 27, 0.95);
+      border-top: 1px solid rgba(205, 214, 244, 0.1);
+      padding: 4px;
+      gap: 4px;
+      justify-content: center;
+      flex-wrap: wrap;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #modbar.visible { display: flex; }
+    .modkey {
+      background: rgba(69, 71, 90, 0.6);
+      color: #cdd6f4;
+      border: 1px solid rgba(205, 214, 244, 0.15);
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-family: 'FiraCode', monospace;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .modkey:active { background: rgba(137, 180, 250, 0.3); }
+    .modkey.active { background: rgba(166,227,161,0.3); border-color: #a6e3a1; color: #a6e3a1; }
   </style>
   <script type="importmap">
   {
@@ -86,6 +117,16 @@
     </select>
   </div>
   <div id="terminal"></div>
+  <div id="modbar">
+    <button class="modkey" data-key="tab">Tab</button>
+    <button class="modkey" data-key="esc">Esc</button>
+    <button class="modkey" data-mod="ctrl">Ctrl</button>
+    <button class="modkey" data-mod="alt">Alt</button>
+    <button class="modkey" data-key="up">↑</button>
+    <button class="modkey" data-key="down">↓</button>
+    <button class="modkey" data-key="left">←</button>
+    <button class="modkey" data-key="right">→</button>
+  </div>
 
   <script type="module">
     import { WTerm } from "@wterm/dom";
@@ -273,6 +314,11 @@
     connect();
 
     term.onData = (data) => {
+      if (modCtrl || modAlt) {
+        data = applyMod(data);
+        send({ type: "input", data });
+        return;
+      }
       if (echoEnabled && data.length === 1 && isPrintable(data)) {
         term.write(data);
         pred += data;
@@ -284,6 +330,73 @@
       send({ type: "input", data });
     };
     term.onResize = (cols, rows) => { clearPred(); send({ type: "resize", cols, rows }); };
+
+    // Mobile modifier bar
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+    const modbar = document.getElementById("modbar");
+    if (isMobile) {
+      modbar.classList.add("visible");
+      document.getElementById("terminal").style.height = "calc(100vh - 44px)";
+      const saved = parseInt(savedFontSize) || 14;
+      if (saved < 16) {
+        fontSizePicker.value = "16";
+        term.element.style.setProperty("--term-font-size", "16px");
+        localStorage.setItem("terminal-font-size", "16");
+      }
+    }
+
+    let modCtrl = false;
+    let modAlt = false;
+    const modKeys = { ctrl: "ctrl", alt: "alt" };
+    const sendKeys = {
+      tab: "\t",
+      esc: "\x1b",
+      up: "\x1b[A",
+      down: "\x1b[B",
+      right: "\x1b[C",
+      left: "\x1b[D",
+    };
+
+    function clearMods() {
+      modCtrl = false;
+      modAlt = false;
+      modbar.querySelectorAll(".modkey[data-mod]").forEach(b => b.classList.remove("active"));
+    }
+
+    function applyMod(ch) {
+      let s = ch;
+      if (modAlt) s = "\x1b" + s;
+      if (modCtrl && s.length === 1) {
+        const c = s.toLowerCase().charCodeAt(0);
+        if (c >= 0x61 && c <= 0x7a) s = String.fromCharCode(c - 0x60);
+        else if (s === "[") s = "\x1b";
+        else if (s === "\\") s = "\x1c";
+        else if (s === "]") s = "\x1d";
+        else if (s === "^") s = "\x1e";
+        else if (s === "_") s = "\x1f";
+      }
+      clearMods();
+      return s;
+    }
+
+    modbar.addEventListener("click", (e) => {
+      const btn = e.target.closest(".modkey");
+      if (!btn) return;
+      e.preventDefault();
+
+      if (btn.dataset.mod) {
+        const mod = btn.dataset.mod;
+        if (mod === "ctrl") { modCtrl = !modCtrl; btn.classList.toggle("active", modCtrl); }
+        if (mod === "alt") { modAlt = !modAlt; btn.classList.toggle("active", modAlt); }
+        return;
+      }
+
+      const key = btn.dataset.key;
+      if (key && sendKeys[key]) {
+        send({ type: "input", data: applyMod(sendKeys[key]) });
+      }
+    });
   </script>
 </body>
 </html>
