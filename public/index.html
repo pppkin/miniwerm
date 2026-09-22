@@ -15,7 +15,9 @@
       padding: 0;
       border-radius: 0;
       box-shadow: none;
-      touch-action: pan-y;
+    }
+    .wterm {
+      touch-action: auto;
     }
     #controls {
       position: fixed;
@@ -432,9 +434,10 @@
       }
     });
 
-    // Prevent iOS rubber-band scrolling on body
+    // Prevent iOS rubber-band scrolling outside terminal
     document.addEventListener("touchmove", (e) => {
-      if (e.target === document.body || e.target === document.documentElement) {
+      const termEl = document.getElementById("terminal");
+      if (!termEl.contains(e.target)) {
         e.preventDefault();
       }
     }, { passive: false });
