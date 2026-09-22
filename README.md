@@ -23,7 +23,13 @@ Open `http://localhost:7654`.
 - Auto-reconnect with backoff
 - Catppuccin themes (Mocha, Macchiato, Frappé, Latte)
 - FiraCode font, adjustable size
+- Mobile modifier bar (Tab, Esc, Ctrl, Alt, arrows)
+- Local echo toggle for fast connections
 - Localhost-only (no network access)
+
+## Screenshot
+
+![iOS](public/ScreenShot_iOS.png)
 
 ## Sessions
 
