@@ -8,13 +8,14 @@
   <style>
     @font-face { font-family: 'FiraCode'; src: url('FiraCode-VF.ttf') format('truetype'); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; overflow: hidden; touch-action: none; -webkit-overflow-scrolling: auto; }
+    html, body { height: 100%; overflow: hidden; }
     #terminal {
       width: 100vw;
       height: 100vh;
       padding: 0;
       border-radius: 0;
       box-shadow: none;
+      touch-action: pan-y;
     }
     #controls {
       position: fixed;
