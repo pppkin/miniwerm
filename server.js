@@ -95,9 +95,10 @@ wss.on("connection", (ws, req) => {
 
   ws.on("message", (raw) => {
     let msg = null;
-    const isBinary = Buffer.isBuffer(raw);
 
-    if (!isBinary) {
+    if (raw.length >= 2 && (raw[0] === TYPE_INPUT || raw[0] === TYPE_OUTPUT)) {
+      // Binary frame — handled below
+    } else {
       try {
         msg = JSON.parse(raw.toString());
       } catch {
