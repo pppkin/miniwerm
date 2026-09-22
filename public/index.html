@@ -359,8 +359,8 @@
     };
 
     // Mobile modifier bar
-    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-      || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+    const isMobile = navigator.maxTouchPoints > 0
+      || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const modbar = document.getElementById("modbar");
     if (isMobile) {
       modbar.classList.add("visible");
