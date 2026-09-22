@@ -8,7 +8,7 @@
   <style>
     @font-face { font-family: 'FiraCode'; src: url('FiraCode-VF.ttf') format('truetype'); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; overflow: hidden; }
+    html, body { height: 100%; overflow: hidden; touch-action: none; -webkit-overflow-scrolling: auto; }
     #terminal {
       width: 100vw;
       height: 100vh;
@@ -430,6 +430,13 @@
         sendInput(applyMod(sendKeys[key]));
       }
     });
+
+    // Prevent iOS rubber-band scrolling on body
+    document.addEventListener("touchmove", (e) => {
+      if (e.target === document.body || e.target === document.documentElement) {
+        e.preventDefault();
+      }
+    }, { passive: false });
   </script>
 </body>
 </html>
