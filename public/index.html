@@ -8,7 +8,7 @@
   <style>
     @font-face { font-family: 'FiraCode'; src: url('FiraCode-VF.ttf') format('truetype'); }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; overflow: hidden; }
+    html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     #terminal {
       width: 100vw;
       height: 100vh;
@@ -434,13 +434,6 @@
       }
     });
 
-    // Prevent iOS rubber-band scrolling outside terminal
-    document.addEventListener("touchmove", (e) => {
-      const termEl = document.getElementById("terminal");
-      if (!termEl.contains(e.target)) {
-        e.preventDefault();
-      }
-    }, { passive: false });
   </script>
 </body>
 </html>
