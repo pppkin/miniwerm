@@ -17,7 +17,13 @@
       box-shadow: none;
     }
     .wterm {
-      touch-action: auto;
+      touch-action: none;
+    }
+    /* Safari recognizes overflow-y:scroll more reliably than auto for
+       touch routing on dynamic scrollers. */
+    .wterm.has-scrollback,
+    .wterm.has-image-flow {
+      overflow-y: scroll;
     }
     #controls {
       position: fixed;
@@ -361,13 +367,45 @@
       resizeTimer = setTimeout(() => send({ type: "resize", cols, rows }), 100);
     };
 
-    // Debug: log touch events
-    ["touchstart", "touchmove", "touchend", "touchcancel"].forEach((evt) => {
-      document.addEventListener(evt, (e) => {
-        const el = e.target.tagName + (e.target.className ? "." + e.target.className.split(" ")[0] : "");
-        console.log(`[touch] ${evt} target=${el} touches=${e.touches.length} passive=${evt.passive}`);
-      }, { capture: true, passive: true });
-    });
+    // Manual single-finger scroll: iPadOS WebKit often fails to route pan
+    // gestures to nested overflow scrollers under position:fixed siblings
+    // (the gesture goes to the overflow:hidden document, so nothing moves).
+    // Drive scrollTop ourselves; touch-action:none stops native double-scroll.
+    let touchActive = false;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartScrollTop = 0;
+    const TOUCH_SLOP = 4;
+
+    term.element.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) {
+        touchActive = false;
+        return;
+      }
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchStartScrollTop = term.element.scrollTop;
+      touchActive = true;
+    }, { passive: true });
+
+    term.element.addEventListener("touchmove", (e) => {
+      if (!touchActive || e.touches.length !== 1) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const t = e.touches[0];
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      if (Math.abs(dx) < TOUCH_SLOP && Math.abs(dy) < TOUCH_SLOP) return;
+      if (Math.abs(dx) > Math.abs(dy)) return;
+      const max = term.element.scrollHeight - term.element.clientHeight;
+      term.element.scrollTop = Math.max(0, Math.min(max, touchStartScrollTop - dy));
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    const endTouch = () => { touchActive = false; };
+    term.element.addEventListener("touchend", endTouch, { passive: true });
+    term.element.addEventListener("touchcancel", endTouch, { passive: true });
 
     // Mobile modifier bar
     const isMobile = navigator.maxTouchPoints > 0
